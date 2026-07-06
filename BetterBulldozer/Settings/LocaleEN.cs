@@ -6,8 +6,6 @@ namespace Better_Bulldozer.Settings
 {
     using System.Collections.Generic;
     using Colossal;
-    using Colossal.PSI.Common;
-    using Game.Settings;
 
     /// <summary>
     /// Localization for <see cref="BetterBulldozerMod"/> mod in English.
@@ -34,7 +32,6 @@ namespace Better_Bulldozer.Settings
         {
             return $"BetterBulldozer.WARNING_TOOLTIP[{key}]";
         }
-
 
         /// <summary>
         /// Returns the locale key for a tooltip title key.
@@ -147,7 +144,6 @@ namespace Better_Bulldozer.Settings
                 { WarningTooltipKey("RemovingSubelementsFromServiceBuildings"), "Recommend purchasing all upgrades before removing single sub-elements from service buildings to avoid regeneration." },
             };
         }
-
 
         /// <inheritdoc/>
         public void Unload()

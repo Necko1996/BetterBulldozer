@@ -62,7 +62,6 @@ namespace Better_Bulldozer.Systems
                 return;
             }
 
-
             AddUpdatedJob addUpdatedJob = new AddUpdatedJob()
             {
                 buffer = m_Barrier.CreateCommandBuffer().AsParallelWriter(),

@@ -7,7 +7,6 @@ namespace Better_Bulldozer.Settings
     using Better_Bulldozer.Systems;
     using Colossal.IO.AssetDatabase;
     using Game;
-    using Game.Input;
     using Game.Modding;
     using Game.Settings;
     using Game.Tools;
