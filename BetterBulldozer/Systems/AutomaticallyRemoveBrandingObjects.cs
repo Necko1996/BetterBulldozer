@@ -27,6 +27,7 @@ namespace Better_Bulldozer.Systems
         private ILog m_Log;
         private EntityQuery m_UpdateQuery;
         private EntityQuery m_BrandObjectPrefabQuery;
+        private EntityQuery m_StreetSignPrefabQuery;
         private EntityQuery m_UpdateEventQuery;
         private PrefabSystem m_PrefabSystem;
         private ModificationEndBarrier m_Barrier;
@@ -68,6 +69,11 @@ namespace Better_Bulldozer.Systems
             m_BrandObjectPrefabQuery = SystemAPI.QueryBuilder()
                 .WithAll<BrandObjectData>()
                 .Build();
+
+            m_StreetSignPrefabQuery = SystemAPI.QueryBuilder()
+                .WithAll<TrafficSignData>()
+                .Build();
+
             Enabled = false;
         }
 
@@ -108,12 +114,12 @@ namespace Better_Bulldozer.Systems
                 m_JustLoaded = false;
             }
 
-
             NativeList<Entity> brandingObjectPrefabsEntities = m_BrandObjectPrefabQuery.ToEntityListAsync(Allocator.TempJob, out JobHandle brandingObjectJobHandle);
+            NativeList<Entity> streetSignPrefabs = m_StreetSignPrefabQuery.ToEntityListAsync(Allocator.TempJob, out JobHandle streetSignJobHandle);
 
             NativeList<Entity> brandingSubObjects = new NativeList<Entity>(Allocator.TempJob);
 
-            JobHandle combinedDependency = JobHandle.CombineDependencies(Dependency, brandingObjectJobHandle);
+            JobHandle dynamicDependency = Dependency;
 
             if (!subObjectQuery.IsEmptyIgnoreFilter)
             {
@@ -126,7 +132,7 @@ namespace Better_Bulldozer.Systems
                     m_SubObjects = brandingSubObjects,
                 };
 
-                Dependency = gatherSubObjectsJob.Schedule(subObjectQuery, combinedDependency);
+                dynamicDependency = gatherSubObjectsJob.Schedule(subObjectQuery, JobHandle.CombineDependencies(dynamicDependency, brandingObjectJobHandle));
             }
 
             if (!m_UpdateEventQuery.IsEmptyIgnoreFilter)
@@ -140,10 +146,27 @@ namespace Better_Bulldozer.Systems
                     m_SubObjects = brandingSubObjects,
                 };
 
-                Dependency = gatherSubObjectsFromEventsJob.Schedule(m_UpdateEventQuery, combinedDependency);
+                dynamicDependency = gatherSubObjectsFromEventsJob.Schedule(m_UpdateEventQuery, JobHandle.CombineDependencies(dynamicDependency, brandingObjectJobHandle));
             }
 
-            brandingObjectPrefabsEntities.Dispose(Dependency);
+            brandingObjectPrefabsEntities.Dispose(dynamicDependency);
+
+            if (!subObjectQuery.IsEmptyIgnoreFilter)
+            {
+                FilterAndGatherTrafficSignsJob trafficSignsJob = new FilterAndGatherTrafficSignsJob()
+                {
+                    m_SubObjectType = SystemAPI.GetBufferTypeHandle<Game.Objects.SubObject>(isReadOnly: true),
+                    m_PrefabRefLookup = SystemAPI.GetComponentLookup<PrefabRef>(isReadOnly: true),
+                    m_TrafficSignLookup = SystemAPI.GetComponentLookup<TrafficSignData>(isReadOnly: true),
+                    m_StreetSignPrefabs = streetSignPrefabs,
+                    m_SubObjects = brandingSubObjects,
+                };
+
+                dynamicDependency = trafficSignsJob.Schedule(subObjectQuery, JobHandle.CombineDependencies(dynamicDependency, streetSignJobHandle));
+            }
+
+            streetSignPrefabs.Dispose(dynamicDependency);
+
             HandleDeleteInXFramesJob handleDeleteInXFramesJob = new HandleDeleteInXFramesJob()
             {
                 m_DeleteInXFramesLookup = SystemAPI.GetComponentLookup<DeleteInXFrames>(isReadOnly: true),
@@ -152,7 +175,7 @@ namespace Better_Bulldozer.Systems
                 m_TransformLookup = SystemAPI.GetComponentLookup<Game.Objects.Transform>(isReadOnly: true),
             };
 
-            JobHandle handleDeleteInXFramesJobHandle = handleDeleteInXFramesJob.Schedule(Dependency);
+            JobHandle handleDeleteInXFramesJobHandle = handleDeleteInXFramesJob.Schedule(dynamicDependency);
             m_Barrier.AddJobHandleForProducer(handleDeleteInXFramesJobHandle);
             Dependency = handleDeleteInXFramesJobHandle;
 
@@ -162,24 +185,77 @@ namespace Better_Bulldozer.Systems
 #if BURST
         [BurstCompile]
 #endif
-        private struct GatherSubObjectsJob : IJobChunk
+        private struct FilterAndGatherTrafficSignsJob : IJobChunk
         {
             [ReadOnly]
             public BufferTypeHandle<Game.Objects.SubObject> m_SubObjectType;
+
             [ReadOnly]
-            public NativeList<Entity> m_BrandingObjectPrefabs;
-            public NativeList<Entity> m_SubObjects;
+            public ComponentLookup<TrafficSignData> m_TrafficSignLookup;
+
             [ReadOnly]
             public ComponentLookup<PrefabRef> m_PrefabRefLookup;
+
             [ReadOnly]
-            public BufferLookup<Game.Objects.SubObject> m_SubObjectLookup;
+            public NativeList<Entity> m_StreetSignPrefabs;
+
+            public NativeList<Entity> m_SubObjects;
 
             public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
             {
                 BufferAccessor<Game.Objects.SubObject> subObjectBufferAccessor = chunk.GetBufferAccessor(ref m_SubObjectType);
+
                 for (int i = 0; i < chunk.Count; i++)
                 {
                     DynamicBuffer<Game.Objects.SubObject> dynamicBuffer = subObjectBufferAccessor[i];
+
+                    foreach (Game.Objects.SubObject subObject in dynamicBuffer)
+                    {
+                        if (!m_PrefabRefLookup.TryGetComponent(subObject.m_SubObject, out PrefabRef prefabRef) || !m_StreetSignPrefabs.Contains(prefabRef.m_Prefab))
+                        {
+                            continue;
+                        }
+
+                        // Check if it has our specific mask component configuration
+                        if (m_TrafficSignLookup.TryGetComponent(prefabRef.m_Prefab, out TrafficSignData signData))
+                        {
+                            if (signData.m_TypeMask == 256)
+                            {
+                                m_SubObjects.Add(subObject.m_SubObject);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+#if BURST
+        [BurstCompile]
+#endif
+        private struct GatherSubObjectsJob : IJobChunk
+        {
+            [ReadOnly]
+            public BufferTypeHandle<Game.Objects.SubObject> m_SubObjectType;
+
+            [ReadOnly]
+            public NativeList<Entity> m_BrandingObjectPrefabs;
+
+            [ReadOnly]
+            public ComponentLookup<PrefabRef> m_PrefabRefLookup;
+
+            [ReadOnly]
+            public BufferLookup<Game.Objects.SubObject> m_SubObjectLookup;
+
+            public NativeList<Entity> m_SubObjects;
+
+            public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
+            {
+                BufferAccessor<Game.Objects.SubObject> subObjectBufferAccessor = chunk.GetBufferAccessor(ref m_SubObjectType);
+
+                for (int i = 0; i < chunk.Count; i++)
+                {
+                    DynamicBuffer<Game.Objects.SubObject> dynamicBuffer = subObjectBufferAccessor[i];
+
                     foreach (Game.Objects.SubObject subObject in dynamicBuffer)
                     {
                         if (!m_PrefabRefLookup.TryGetComponent(subObject.m_SubObject, out PrefabRef prefabRef) || !m_BrandingObjectPrefabs.Contains(prefabRef.m_Prefab))
@@ -188,14 +264,13 @@ namespace Better_Bulldozer.Systems
                         }
 
                         m_SubObjects.Add(subObject.m_SubObject);
-                        if (!m_SubObjectLookup.TryGetBuffer(subObject.m_SubObject, out DynamicBuffer<Game.Objects.SubObject> deepSubObjectBuffer))
-                        {
-                            continue;
-                        }
 
-                        foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
+                        if (m_SubObjectLookup.TryGetBuffer(subObject.m_SubObject, out DynamicBuffer<Game.Objects.SubObject> deepSubObjectBuffer))
                         {
-                            m_SubObjects.Add(deepSubObject.m_SubObject);
+                            foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
+                            {
+                                m_SubObjects.Add(deepSubObject.m_SubObject);
+                            }
                         }
                     }
                 }
@@ -209,20 +284,26 @@ namespace Better_Bulldozer.Systems
         {
             [ReadOnly]
             public BufferLookup<Game.Objects.SubObject> m_SubObjectLookup;
+
             [ReadOnly]
             public NativeList<Entity> m_BrandingObjectPrefabs;
-            public NativeList<Entity> m_SubObjects;
+
             [ReadOnly]
             public ComponentLookup<PrefabRef> m_PrefabRefLookup;
+
             [ReadOnly]
             public ComponentTypeHandle<RentersUpdated> m_RentersUpdatedType;
+
+            public NativeList<Entity> m_SubObjects;
 
             public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
             {
                 NativeArray<RentersUpdated> rentersUpdatedNativeArray = chunk.GetNativeArray(ref m_RentersUpdatedType);
+
                 for (int i = 0; i < chunk.Count; i++)
                 {
                     RentersUpdated rentersUpdated = rentersUpdatedNativeArray[i];
+
                     if (!m_SubObjectLookup.TryGetBuffer(rentersUpdated.m_Property, out DynamicBuffer<Game.Objects.SubObject> dynamicBuffer))
                     {
                         continue;
@@ -236,14 +317,13 @@ namespace Better_Bulldozer.Systems
                         }
 
                         m_SubObjects.Add(subObject.m_SubObject);
-                        if (!m_SubObjectLookup.TryGetBuffer(subObject.m_SubObject, out DynamicBuffer<Game.Objects.SubObject> deepSubObjectBuffer))
-                        {
-                            continue;
-                        }
 
-                        foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
+                        if (m_SubObjectLookup.TryGetBuffer(subObject.m_SubObject, out DynamicBuffer<Game.Objects.SubObject> deepSubObjectBuffer))
                         {
-                            m_SubObjects.Add(deepSubObject.m_SubObject);
+                            foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
+                            {
+                                m_SubObjects.Add(deepSubObject.m_SubObject);
+                            }
                         }
                     }
                 }
