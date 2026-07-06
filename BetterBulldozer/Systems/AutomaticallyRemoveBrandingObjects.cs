@@ -62,7 +62,9 @@ namespace Better_Bulldozer.Systems
                 });
 
             m_Barrier = World.GetOrCreateSystemManaged<ModificationEndBarrier>();
+
             base.OnCreate();
+
             m_BrandObjectPrefabQuery = SystemAPI.QueryBuilder()
                 .WithAll<BrandObjectData>()
                 .Build();
@@ -111,6 +113,8 @@ namespace Better_Bulldozer.Systems
 
             NativeList<Entity> brandingSubObjects = new NativeList<Entity>(Allocator.TempJob);
 
+            JobHandle combinedDependency = JobHandle.CombineDependencies(Dependency, brandingObjectJobHandle);
+
             if (!subObjectQuery.IsEmptyIgnoreFilter)
             {
                 GatherSubObjectsJob gatherSubObjectsJob = new GatherSubObjectsJob()
@@ -118,11 +122,11 @@ namespace Better_Bulldozer.Systems
                     m_BrandingObjectPrefabs = brandingObjectPrefabsEntities,
                     m_PrefabRefLookup = SystemAPI.GetComponentLookup<PrefabRef>(isReadOnly: true),
                     m_SubObjectLookup = SystemAPI.GetBufferLookup<Game.Objects.SubObject>(isReadOnly: true),
-                    m_SubObjects = brandingSubObjects,
                     m_SubObjectType = SystemAPI.GetBufferTypeHandle<Game.Objects.SubObject>(isReadOnly: true),
+                    m_SubObjects = brandingSubObjects,
                 };
 
-                Dependency = gatherSubObjectsJob.Schedule(subObjectQuery, JobHandle.CombineDependencies(Dependency, brandingObjectJobHandle));
+                Dependency = gatherSubObjectsJob.Schedule(subObjectQuery, combinedDependency);
             }
 
             if (!m_UpdateEventQuery.IsEmptyIgnoreFilter)
@@ -136,7 +140,7 @@ namespace Better_Bulldozer.Systems
                     m_SubObjects = brandingSubObjects,
                 };
 
-                Dependency = gatherSubObjectsFromEventsJob.Schedule(m_UpdateEventQuery, JobHandle.CombineDependencies(Dependency, brandingObjectJobHandle));
+                Dependency = gatherSubObjectsFromEventsJob.Schedule(m_UpdateEventQuery, combinedDependency);
             }
 
             brandingObjectPrefabsEntities.Dispose(Dependency);
@@ -151,6 +155,7 @@ namespace Better_Bulldozer.Systems
             JobHandle handleDeleteInXFramesJobHandle = handleDeleteInXFramesJob.Schedule(Dependency);
             m_Barrier.AddJobHandleForProducer(handleDeleteInXFramesJobHandle);
             Dependency = handleDeleteInXFramesJobHandle;
+
             brandingSubObjects.Dispose(handleDeleteInXFramesJobHandle);
         }
 
@@ -190,7 +195,7 @@ namespace Better_Bulldozer.Systems
 
                         foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
                         {
-                            m_SubObjects.Add(subObject.m_SubObject);
+                            m_SubObjects.Add(deepSubObject.m_SubObject);
                         }
                     }
                 }
@@ -238,13 +243,12 @@ namespace Better_Bulldozer.Systems
 
                         foreach (Game.Objects.SubObject deepSubObject in deepSubObjectBuffer)
                         {
-                            m_SubObjects.Add(subObject.m_SubObject);
+                            m_SubObjects.Add(deepSubObject.m_SubObject);
                         }
                     }
                 }
             }
         }
-
 
 #if BURST
         [BurstCompile]
@@ -270,11 +274,14 @@ namespace Better_Bulldozer.Systems
 
                     buffer.SetComponent(entity, new DeleteInXFrames() { m_FramesRemaining = 30 });
 
-                    if (m_TransformLookup.HasComponent(entity) && m_TransformLookup.TryGetComponent(entity, out Game.Objects.Transform transform) && transform.m_Position.y > 0)
+                    if (m_TransformLookup.HasComponent(entity))
                     {
-                        transform.m_Position.y = 0;
-                        buffer.SetComponent(entity, transform);
-                        buffer.AddComponent<Updated>(entity);
+                        if (m_TransformLookup.TryGetComponent(entity, out Game.Objects.Transform transform) && transform.m_Position.y > 0)
+                        {
+                            transform.m_Position.y = 0;
+                            buffer.SetComponent(entity, transform);
+                            buffer.AddComponent<Updated>(entity);
+                        }
                     }
                 }
             }
