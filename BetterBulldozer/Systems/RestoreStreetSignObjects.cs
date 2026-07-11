@@ -1,4 +1,4 @@
-﻿// <copyright file="RestoreBrandingObjects.cs" company="Yenyang's Mods. MIT License">
+﻿// <copyright file="RestoreStreetSignObjects.cs" company="Yenyang's Mods. MIT License">
 // Copyright (c) Yenyang's Mods. MIT License. All rights reserved.
 // </copyright>
 
@@ -20,7 +20,7 @@ namespace Better_Bulldozer.Systems
     /// <summary>
     /// A system that automatically removes fences and hedges from created buildings.
     /// </summary>
-    public partial class RestoreBrandingObjects : GameSystemBase
+    public partial class RestoreStreetSignObjects : GameSystemBase
     {
         private ILog m_Log;
         private EntityQuery m_SubObjectQuery;
@@ -28,9 +28,9 @@ namespace Better_Bulldozer.Systems
         private ToolOutputBarrier m_Barrier;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RestoreBrandingObjects"/> class.
+        /// Initializes a new instance of the <see cref="RestoreStreetSignObjects"/> class.
         /// </summary>
-        public RestoreBrandingObjects()
+        public RestoreStreetSignObjects()
         {
         }
 
@@ -38,11 +38,15 @@ namespace Better_Bulldozer.Systems
         protected override void OnCreate()
         {
             m_Log = BetterBulldozerMod.Instance.Logger;
-            m_Log.Info($"{nameof(AutomaticallyRemoveBrandingObjects)}.{nameof(OnCreate)}.");
+            m_Log.Info($"{nameof(AutomaticallyRemoveStreetSignObjects)}.{nameof(OnCreate)}.");
+
             m_Barrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_ToolSystem = World.GetExistingSystemManaged<ToolSystem>();
+
             base.OnCreate();
+
             Enabled = false;
+
             m_SubObjectQuery = SystemAPI.QueryBuilder()
                 .WithAll<Game.Objects.SubObject>()
                 .WithNone<Temp, Deleted, DeleteInXFrames>()
