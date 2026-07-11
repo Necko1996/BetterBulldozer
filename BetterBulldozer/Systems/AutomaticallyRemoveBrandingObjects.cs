@@ -41,6 +41,14 @@ namespace Better_Bulldozer.Systems
         {
         }
 
+        public void ForceFullScan()
+        {
+            if (Enabled)
+            {
+                m_JustLoaded = true;
+            }
+        }
+
         /// <inheritdoc/>
         protected override void OnCreate()
         {
